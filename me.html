@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>事件空间分析平台</title>
+    <link rel="stylesheet" href="https://js.arcgis.com/4.32/esri/themes/light/main.css">
+    <style>
+        /* 保持原有样式不变 */
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        #header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 8px 15px;
+            height: 50px;
+            box-sizing: border-box;
+            position: relative;
+            z-index: 2000;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        #header h1 {
+            margin: 0;
+            font-size: 1.5em;
+            line-height: 34px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+        }
+        #viewDiv {
+            height: calc(100% - 50px);
+        }
+        #basemapGallery {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 300px;
+            height: 200px;
+            background-color: rgba(255,255,255,0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            z-index: 1000;
+            overflow: auto;
+            display: none;
+        }
+        .tool-panel {
+            position: absolute;
+            top: 60px;
+            left: 20px;
+            background: rgba(255,255,255,0.9);
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            z-index: 1000;
+        }
+        .tool-button {
+            margin: 5px;
+            padding: 8px 12px;
+            cursor: pointer;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: block;
+            width: 120px;
+            transition: all 0.2s;
+        }
+        .tool-button:hover {
+            background: #f8f8f8;
+            transform: translateY(-1px);
+        }
+        .esri-search {
+            top: 60px !important;
+            right: 20px !important;
+        }
+    </style>
+    <script src="https://js.arcgis.com/4.32/"></script>
+    <script>
+        require([
+            "esri/Map",
+            "esri/views/MapView",
+            "esri/widgets/BasemapGallery",
+            "esri/widgets/ScaleBar",
+            "esri/widgets/Legend",
+            "esri/widgets/Search",
+            "esri/widgets/LayerList",
+            "esri/layers/FeatureLayer",
+            "esri/Graphic",
+            "esri/layers/GraphicsLayer",
+            "esri/widgets/Measurement"
+        ], function (
+            Map, MapView, BasemapGallery, ScaleBar, Legend, 
+            Search, LayerList, FeatureLayer, Graphic,
+            GraphicsLayer, Measurement
+        ) {
+            const map = new Map({ basemap: "streets-vector" });
+
+            const incidentLayer = new FeatureLayer({
+                url: "https://www.geosceneonline.cn/server/rest/services/Hosted/incidents_01/FeatureServer",
+                outFields: ["*"]
+            });
+            map.add(incidentLayer);
+
+            const view = new MapView({
+                container: "viewDiv",
+                map: map,
+                center: [-118, 34],
+                zoom: 3
+            });
+
+            view.when(() => {
+                // 初始化基础组件
+                const scaleBar = new ScaleBar({ view: view, unit: "metric" });
+                view.ui.add(scaleBar, "bottom-left");
+
+                const legend = new Legend({ view: view });
+                view.ui.add(legend, "bottom-right");
+
+                const search = new Search({ view: view });
+                view.ui.add(search, "top-right");
+
+                const layerList = new LayerList({ view: view });
+                view.ui.add(layerList, "top-left");
+
+                // 底图切换功能
+                const basemapGallery = new BasemapGallery({
+                    view: view,
+                    container: "basemapGallery",
+                    source: { portal: { url: "https://www.arcgis.com", useVectorBasemaps: true } }
+                });
+
+                const basemapToggle = document.createElement("button");
+                basemapToggle.className = "tool-button";
+                basemapToggle.textContent = "底图切换";
+                basemapToggle.onclick = () => {
+                    const gallery = document.getElementById("basemapGallery");
+                    gallery.style.display = gallery.style.display === "none" ? "block" : "none";
+                };
+                document.querySelector(".tool-panel").appendChild(basemapToggle);
+
+                // 属性查询功能（保持原样）
+                view.on("click", async (event) => {
+                    view.popup.close();
+                    try {
+                        const { features } = await incidentLayer.queryFeatures({
+                            geometry: event.mapPoint,
+                            spatialRelationship: "intersects",
+                            returnGeometry: true,
+                            outFields: ["*"]
+                        });
+
+                        if (features.length > 0) {
+                            const attr = features[0].attributes;
+                            const content = `
+                                <h3>事件详情</h3>
+                                <p>类型：${attr.Crime_Type || "无数据"}</p>
+                                <p>地址：${attr.Address || "无数据"}</p>
+                                <p>时间：${new Date(attr.Date_).toLocaleString()}</p>
+                            `;
+
+                            view.popup.open({
+                                title: "查询结果",
+                                content: content,
+                                location: event.mapPoint
+                            });
+                        }
+                    } catch (error) {
+                        console.error("查询错误:", error);
+                    }
+                });
+
+                // 新增测量功能
+                const measurement = new Measurement({
+                    view: view,
+                    container: document.createElement("div")
+                });
+
+                // 创建测量按钮
+                const createMeasurementButton = (type, chineseName) => {
+                    const btn = document.createElement("button");
+                    btn.className = "tool-button";
+                    btn.textContent = chineseName;
+                    btn.addEventListener("click", () => {
+                        // 清除现有测量结果
+                        measurement.clear();
+                        // 设置测量模式
+                        measurement.activeTool = type;
+                        // 自动聚焦到测量工具
+                        view.focus();
+                    });
+                    return btn;
+                };
+
+                // 添加测量按钮到面板
+                const distanceBtn = createMeasurementButton("distance", "距离测量");
+                const areaBtn = createMeasurementButton("area", "面积测量");
+                document.querySelector(".tool-panel").appendChild(distanceBtn);
+                document.querySelector(".tool-panel").appendChild(areaBtn);
+
+                // 测量结果样式自定义
+                measurement.viewModel.lineSymbol = {
+                    type: "simple-line",
+                    color: [255, 0, 0],
+                    width: 2,
+                    style: "solid"
+                };
+
+                measurement.viewModel.areaSymbol = {
+                    type: "simple-fill",
+                    color: [255, 165, 0, 0.3],
+                    outline: {
+                        color: [255, 69, 0],
+                        width: 2
+                    }
+                };
+            });
+        });
+    </script>
+</head>
+<body>
+    <div id="header">
+        <h1>🔍 事件空间分析平台</h1>
+    </div>
+    <div class="tool-panel"></div>
+    <div id="viewDiv"></div>
+    <div id="basemapGallery"></div>
+</body>
+</html>
